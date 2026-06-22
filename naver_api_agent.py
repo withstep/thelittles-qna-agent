@@ -341,5 +341,57 @@ def update_inquiry_to_db(q_id, p_name, title, content, answer, embedding_model=N
     conn.close()
     print(f"✅ 문의 {q_id}에 대한 답변이 로컬 DB에 반영되었습니다.")
 
+def ingest_excel_qa(file_path_or_bytes, embedding_model=None):
+    """Excel 파일에 있는 Q&A 가이드라인을 로컬 DB에 삽입/업데이트합니다."""
+    import pandas as pd
+    import uuid
+    
+    if embedding_model is None:
+        embedding_model = load_embedding_model()
+        
+    db_path = str(DB_PATH)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # 기존 엑셀 가이드라인 데이터 삭제 (최신 파일로 덮어쓰기 위함)
+        cursor.execute("DELETE FROM chunks WHERE subject = 'Q&A 가이드라인'")
+        
+        # 엑셀의 모든 시트 읽기 (첫 두 행 건너뜀)
+        dfs = pd.read_excel(file_path_or_bytes, sheet_name=None, skiprows=2)
+        
+        inserted = 0
+        for sheet_name, df in dfs.items():
+            for index, row in df.iterrows():
+                if len(row) < 3:
+                    continue
+                if pd.isna(row.iloc[1]) or pd.isna(row.iloc[2]):
+                    continue
+                    
+                question = str(row.iloc[1]).strip()
+                answer = str(row.iloc[2]).strip()
+                
+                if not question or not answer:
+                    continue
+                    
+                q_id = f"excel_{uuid.uuid4().hex[:8]}"
+                chunk_text = f"[엑셀 가이드라인: {sheet_name}]\n[고객문의/상황] {question}\n[모범답변] {answer}"
+                emb = embedding_model.encode(chunk_text, normalize_embeddings=True).tolist()
+                emb_bytes = embedding_to_bytes(emb)
+                
+                cursor.execute('''
+                    INSERT INTO chunks (inquiry_id, chunk_text, product_name, subject, is_answered, embedding)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (q_id, chunk_text, '가이드라인', 'Q&A 가이드라인', 1, emb_bytes))
+                inserted += 1
+            
+        conn.commit()
+        return True, f"성공적으로 {inserted}개의 Q&A 가이드라인을 DB에 반영했습니다."
+    except Exception as e:
+        conn.rollback()
+        return False, f"엑셀 처리 중 오류 발생: {str(e)}"
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
     process_and_save()

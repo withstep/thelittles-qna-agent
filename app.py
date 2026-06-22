@@ -145,6 +145,20 @@ with st.sidebar:
     if st.button("🚀 네이버 미답변 문의 AI 답변", use_container_width=True, type="primary"):
         st.session_state.page = "auto_reply"
         st.rerun()
+        
+    with st.expander("📁 Q&A 엑셀 가이드라인 업로드"):
+        st.caption("새로운 엑셀 파일을 업로드하면 기존 가이드라인이 덮어씌워집니다.")
+        uploaded_file = st.file_uploader("엑셀 파일 선택", type=["xlsx", "xls"])
+        if uploaded_file is not None:
+            if st.button("데이터베이스에 반영하기", use_container_width=True):
+                with st.spinner("엑셀 데이터를 분석하고 학습하는 중입니다..."):
+                    import naver_api_agent
+                    agent = load_agent()
+                    success, msg = naver_api_agent.ingest_excel_qa(uploaded_file, agent.model)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
 
     st.divider()
 
