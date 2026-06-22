@@ -198,7 +198,7 @@ if st.session_state.page == "auto_reply":
     # ----------------------------------------
     # [네이버 미답변 자동화 모드] 화면
     # ----------------------------------------
-    st.title("🚀 네이버 스토어 CS 자동화 (Phase 1)")
+    st.title("🚀 네이버 스토어 CS 자동화")
     st.markdown("네이버 커머스에 남아있는 **미답변 문의**를 실시간으로 가져오고, AI가 작성한 초안을 수정한 뒤 즉시 답변을 등록합니다.")
 
     if st.button("🔄 미답변 문의 가져오기 (최근 7일)"):
@@ -269,6 +269,8 @@ if st.session_state.page == "auto_reply":
                             success, msg = naver_api_agent.post_inquiry_answer(q_id, edited_answer)
                             if success:
                                 st.success(msg)
+                                # 벡터 DB에 즉시 업데이트하여 다음 초안 작성 시 반영되도록 함
+                                naver_api_agent.update_inquiry_to_db(q_id, p_name, title, content, edited_answer, agent.model)
                                 # 리스트에서 제거
                                 st.session_state.unanswered_list = [i for i in st.session_state.unanswered_list if str(i.get('questionId', i.get('inquiryNo', ''))) != q_id]
                                 st.rerun()

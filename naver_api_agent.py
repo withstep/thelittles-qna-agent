@@ -308,5 +308,38 @@ def process_and_save():
     print(f"📁 DB 저장 위치: {DB_PATH}")
     print(f"📊 신규 저장: {inserted_count}건 | 업데이트: {updated_count}건")
 
+def update_inquiry_to_db(q_id, p_name, title, content, answer, embedding_model=None):
+    """주어진 단일 질문과 답변을 로컬 vector DB에 즉시 업데이트합니다."""
+    db_path = str(DB_PATH)
+    
+    if embedding_model is None:
+        embedding_model = load_embedding_model()
+        
+    chunk_text = f"[상품명] {p_name}\n[제목] {title}\n[질문] {content}\n[답변] {answer}"
+    emb = embedding_model.encode(chunk_text, normalize_embeddings=True).tolist()
+    emb_bytes = embedding_to_bytes(emb)
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM chunks WHERE inquiry_id = ?", (str(q_id),))
+    existing = cursor.fetchone()
+    
+    if existing:
+        cursor.execute('''
+            UPDATE chunks 
+            SET chunk_text=?, product_name=?, subject=?, is_answered=?, embedding=?
+            WHERE id=?
+        ''', (chunk_text, p_name, title, 1, emb_bytes, existing[0]))
+    else:
+        cursor.execute('''
+            INSERT INTO chunks (inquiry_id, chunk_text, product_name, subject, is_answered, embedding)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (str(q_id), chunk_text, p_name, title, 1, emb_bytes))
+        
+    conn.commit()
+    conn.close()
+    print(f"✅ 문의 {q_id}에 대한 답변이 로컬 DB에 반영되었습니다.")
+
 if __name__ == "__main__":
     process_and_save()
