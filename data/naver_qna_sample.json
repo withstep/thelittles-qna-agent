@@ -1,0 +1,29 @@
+[
+  {
+    "inquiryNo": "N10001",
+    "productName": "리틀약사 알티지 오메가3",
+    "questionTitle": "복용 방법 문의",
+    "questionContent": "이거 하루에 몇 알씩 언제 먹는게 가장 좋나요? 식전 식후 상관없나요?",
+    "answered": true,
+    "answerContent": "고객님 안녕하세요! 오메가3는 지용성 성분이므로 식후에 드시는 것이 체내 흡수율이 높습니다. 하루 1회, 1회 2캡슐을 충분한 물과 함께 섭취를 권장드립니다.",
+    "questionDate": "2023-10-20T10:00:00"
+  },
+  {
+    "inquiryNo": "N10002",
+    "productName": "리틀약사 유산균 프로바이오틱스",
+    "questionTitle": "임산부 섭취 문의",
+    "questionContent": "임신 16주차인데 이 유산균 먹어도 될까요?",
+    "answered": true,
+    "answerContent": "안녕하세요 고객님! 해당 유산균은 임산부도 안전하게 섭취 가능한 균주로 이루어져 있습니다. 다만 임신 중에는 체질 변화가 있을 수 있으니, 섭취 전 담당 주치의와 성분표를 확인 후 섭취하시는 것을 가장 권장드립니다.",
+    "questionDate": "2023-10-21T11:30:00"
+  },
+  {
+    "inquiryNo": "N10003",
+    "productName": "리틀약사 어린이 멀티비타민 구미",
+    "questionTitle": "배송 문의",
+    "questionContent": "오늘 아침 9시에 결제완료했는데 배송 언제오나요?",
+    "answered": true,
+    "answerContent": "안녕하세요 고객님! 평일 오후 2시 이전 결제건은 당일 출고되어 보통 익일에 수령 가능하십니다. 빠르면 내일, 늦어도 모레까지는 받아보실 수 있습니다.",
+    "questionDate": "2023-10-22T09:05:00"
+  }
+]

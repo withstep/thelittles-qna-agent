@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.DS_Store
+data/chats.json
+
+# 대용량 벡터 DB (100MB 초과, 구글 드라이브 연동)
+data/counseling_vectors.db
+
+# 파이썬 가상환경
+venv/
+.venv/
