@@ -1,6 +1,12 @@
 import os
 import sys
+import time
 from retriever import Retriever
+
+# Huggingface Hub / Streamlit Threading 버그(httpx client closed) 우회 및 오프라인 로드 강제
+os.environ["HF_HUB_DISABLE_HTTP2"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 # Optional imports for LLM APIs
 try:
@@ -36,7 +42,17 @@ class QnAAgent:
             if self.model is None:
                 from sentence_transformers import SentenceTransformer
                 print("Loading shared embedding model...")
-                self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+                # Streamlit의 멀티스레드 환경에서 httpx 세션 충돌을 방지하기 위해 재시도 로직 추가
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+                        break
+                    except Exception as e:
+                        print(f"Model load attempt {attempt + 1} failed: {e}")
+                        if attempt == max_retries - 1:
+                            raise
+                        time.sleep(1)
             
             if chat_type == "store":
                 self.retrievers[chat_type] = Retriever(db_path='naver_data/naver_vectors.db', model=self.model)
@@ -80,7 +96,7 @@ class QnAAgent:
 답변:"""
         return prompt
 
-    def generate_answer(self, query: str, top_k: int = 3, use_model: str = "openai", chat_type: str = "health") -> dict:
+    def generate_answer(self, query: str, top_k: int = 3, use_model: str = "openai", chat_type: str = "health", history: list = None) -> dict:
         print(f"Searching for relevant past Q&A for: '{query}' ({chat_type})...")
         retriever = self.get_retriever(chat_type)
         contexts = retriever.hybrid_search(query, top_k=top_k)
@@ -95,22 +111,43 @@ class QnAAgent:
         answer = ""
         
         system_content = "당신은 전문적이고 친절한 약사 '리틀약사'입니다." if chat_type == "health" else "당신은 전문적이고 친절한 '네이버 스토어 고객센터 매니저'입니다."
+        system_content += """
+만약 사용자가 과거의 답변을 수정해달라고 하거나, 새로운 정보(질문과 답변 쌍)를 저장/기억해달라고 명시적으로 요청한다면,
+당신의 일반적인 응답 내용 맨 마지막에 반드시 아래와 같은 정확한 형식으로 수정될 질문과 답변을 포함해주세요:
+[UPDATE_QNA]
+Q: (저장/수정할 질문)
+A: (저장/수정된 답변)
+[/UPDATE_QNA]
+"""
         
         if use_model == "openai" and self.openai_api_key and OpenAI:
+            api_messages = [{"role": "system", "content": system_content}]
+            
+            if history:
+                # 최근 대화 내역 추가 (너무 길어지지 않게 최근 N개만 가져올 수도 있지만 전체를 넘깁니다)
+                for msg in history[-10:]: # 최근 10개로 제한
+                    role = msg.get("role", "user")
+                    if role in ["user", "assistant"]:
+                        api_messages.append({"role": role, "content": msg.get("content", "")})
+            
+            api_messages.append({"role": "user", "content": prompt})
+            
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": prompt}
-                ],
+                messages=api_messages,
                 temperature=0.3
             )
             answer = response.choices[0].message.content
             
         elif use_model == "gemini" and self.gemini_api_key and genai:
+            gemini_prompt = prompt
+            if history:
+                history_str = "\n".join([f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in history[-10:]])
+                gemini_prompt = f"[이전 대화 내역]\n{history_str}\n\n{prompt}"
+                
             response = self.gemini_client.models.generate_content(
                 model='gemini-2.5-flash',
-                contents=prompt,
+                contents=gemini_prompt,
                 config={'temperature': 0.3}
             )
             answer = response.text
@@ -123,6 +160,47 @@ class QnAAgent:
             "sources": [{"subject": c.get('wr_subject', ''), "type": c.get('chunk_type', ''), "date": c.get('wr_datetime', '')} for c in contexts]
         }
 
+    def update_knowledge_base(self, chat_type: str, question: str, answer: str):
+        import sqlite3
+        import uuid
+        import struct
+        from datetime import datetime
+
+        if self.model is None:
+            from sentence_transformers import SentenceTransformer
+            self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+            
+        chunk_text = f"[사용자요청수정]\n[질문] {question}\n[답변] {answer}"
+        emb = self.model.encode(chunk_text, normalize_embeddings=True).tolist()
+        emb_bytes = struct.pack(f'{len(emb)}f', *emb)
+        
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        if chat_type == "store":
+            db_path = 'naver_data/naver_vectors.db'
+            q_id = f"manual_{uuid.uuid4().hex[:8]}"
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO chunks (inquiry_id, chunk_text, product_name, subject, is_answered, embedding)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (q_id, chunk_text, '수정된지식', question, 1, emb_bytes))
+            conn.commit()
+            conn.close()
+            print(f"[STORE DB UPDATED] {question}")
+        else:
+            db_path = 'data/counseling_vectors.db'
+            wr_id = f"manual_{uuid.uuid4().hex[:8]}"
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO chunks (wr_id, chunk_type, chunk_text, ca_name, wr_subject, wr_datetime, wr_qna_ok, embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (wr_id, 'manual', chunk_text, '사용자입력', question, now_str, '1', emb_bytes))
+            conn.commit()
+            conn.close()
+            print(f"[HEALTH DB UPDATED] {question}")
+            
 if __name__ == "__main__":
     agent = QnAAgent()
     

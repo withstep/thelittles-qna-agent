@@ -6,8 +6,9 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      # 벡터DB(SQLite)를 호스트에 보존. 대화 기록은 MariaDB에 저장됨.
+      # 벡터DB(SQLite)를 호스트에 보존.
       - ./data:/app/data
+      - ./naver_data:/app/naver_data
       # API 키 + DB 접속정보 보존
       - ./.env:/app/.env
     environment:
@@ -18,3 +19,7 @@ services:
     restart: unless-stopped
     # 8GB NAS 기준 안전한 메모리 상한 (DSM 여유 확보)
     mem_limit: 4g
+    # NAS 도커의 DNS 리졸버 오류 방지 (외부 API 접속용)
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
