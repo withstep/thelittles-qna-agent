@@ -53,12 +53,27 @@ class Retriever:
             pass
         
         results = []
+        max_id = max((row[0] for row in rows), default=1)
+        
         for row in rows:
             if is_naver:
                 emb = self._bytes_to_embedding(row[6])
                 sim = self._cosine_similarity(query_emb, emb)
                 if sim >= min_similarity:
-                    results.append((sim, {
+                    # 1. 출처 가중치
+                    product_name = row[3]
+                    source_boost = 0.0
+                    if product_name == '엑셀가이드':
+                        source_boost = 0.3
+                    elif product_name == '수정된지식':
+                        source_boost = 0.2
+                        
+                    # 2. 최신성 가중치 (최대 0.1)
+                    recency_boost = (row[0] / max_id) * 0.1
+                    
+                    final_score = sim + source_boost + recency_boost
+                    
+                    results.append((final_score, {
                         'id': row[0],
                         'wr_id': row[1],
                         'chunk_type': '스토어문의',
@@ -67,12 +82,24 @@ class Retriever:
                         'wr_subject': row[4] if row[4] else row[3], # subject or product_name
                         'wr_datetime': '',
                         'wr_qna_ok': row[5],
+                        'sim_raw': sim, # 로깅/디버깅 용도
                     }))
             else:
                 emb = self._bytes_to_embedding(row[8])
                 sim = self._cosine_similarity(query_emb, emb)
                 if sim >= min_similarity:
-                    results.append((sim, {
+                    # 1. 출처 가중치
+                    chunk_type = row[2]
+                    source_boost = 0.0
+                    if chunk_type == 'manual':
+                        source_boost = 0.2
+                        
+                    # 2. 최신성 가중치 (최대 0.1)
+                    recency_boost = (row[0] / max_id) * 0.1
+                    
+                    final_score = sim + source_boost + recency_boost
+                    
+                    results.append((final_score, {
                         'id': row[0],
                         'wr_id': row[1],
                         'chunk_type': row[2],
@@ -81,11 +108,8 @@ class Retriever:
                         'wr_subject': row[5],
                         'wr_datetime': row[6],
                         'wr_qna_ok': row[7],
+                        'sim_raw': sim, # 로깅/디버깅 용도
                     }))
-        
-        results.sort(key=lambda x: x[0], reverse=True)
-        conn.close()
-        return results[:top_k]
         
         results.sort(key=lambda x: x[0], reverse=True)
         conn.close()
@@ -134,8 +158,24 @@ class Retriever:
                 pass
 
         results = []
+        max_id = max((row[0] for row in rows), default=1)
+        
         for row in rows:
-            results.append({
+            fts_rank = row[8]
+            
+            # 1. 출처 가중치
+            chunk_type = row[2]
+            source_boost = 0.0
+            if chunk_type == 'manual':
+                source_boost = 2.0  # FTS 랭크는 음수일수록 높으므로, 크게 빼주어 순위를 올림
+                
+            # 2. 최신성 가중치
+            recency_boost = (row[0] / max_id) * 0.5
+            
+            # FTS는 숫자가 작을수록 우선순위가 높음
+            final_rank = fts_rank - source_boost - recency_boost
+            
+            results.append((final_rank, {
                 'id': row[0],
                 'wr_id': row[1],
                 'chunk_type': row[2],
@@ -144,11 +184,12 @@ class Retriever:
                 'wr_subject': row[5],
                 'wr_datetime': row[6],
                 'wr_qna_ok': row[7],
-                'fts_rank': row[8],
-            })
-        
+                'fts_rank': fts_rank,
+            }))
+            
+        results.sort(key=lambda x: x[0])
         conn.close()
-        return results
+        return [item[1] for item in results]
 
     def hybrid_search(self, query: str, top_k: int = 3, vector_weight: float = 0.7, fts_weight: float = 0.3) -> list:
         vector_results = self.search_similar(query, top_k=top_k * 2)

@@ -1,5 +1,11 @@
 import streamlit as st
 import os
+
+# Huggingface Hub / Streamlit Threading 버그(httpx client closed) 우회 및 오프라인 로드 강제
+os.environ["HF_HUB_DISABLE_HTTP2"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["HF_HUB_OFFLINE"] = "1"
+
 import uuid
 import gdown
 from dotenv import load_dotenv, set_key
