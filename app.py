@@ -147,7 +147,7 @@ def update_api_keys(agent, model_choice):
 
 
 # ==========================================
-# 2. 사이드바 구성 (멀티채팅 관리 및 설정)
+# 2. 사이드바 구성 (메뉴 관리)
 # ==========================================
 chats = load_chats()
 current_chat_id = st.session_state.current_chat_id
@@ -157,10 +157,15 @@ with st.sidebar:
     
     # --- 자동화 봇 ---
     st.subheader("🤖 CS 자동화")
-    if st.button("🚀 네이버 미답변 문의 AI 답변", use_container_width=True, type="primary"):
+    if st.button("🚀 네이버 미답변 문의 처리", use_container_width=True, type="primary" if st.session_state.page == "auto_reply" else "secondary"):
         st.session_state.page = "auto_reply"
         st.rerun()
         
+    if st.button("💊 리틀랩스 Q&A 생성", use_container_width=True, type="primary" if st.session_state.page == "littlelabs_qna" else "secondary"):
+        st.session_state.page = "littlelabs_qna"
+        st.rerun()
+        
+    st.write("")
     with st.expander("📁 Q&A 엑셀 가이드라인 업로드"):
         st.caption("새로운 엑셀 파일을 업로드하면 기존 가이드라인이 덮어씌워집니다.")
         uploaded_file = st.file_uploader("엑셀 파일 선택", type=["xlsx", "xls"])
@@ -174,34 +179,32 @@ with st.sidebar:
                         st.success(msg)
                     else:
                         st.error(msg)
-
+                        
     st.divider()
 
-    # --- 멀티 채팅 세션 ---
-    st.subheader("💬 상담 기록")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("➕ 리틀랩스", use_container_width=True):
-            create_new_chat(chat_type="health")
-            st.rerun()
-    with col2:
-        if st.button("➕ 스마트스토어", use_container_width=True):
-            create_new_chat(chat_type="store")
-            st.rerun()
+    # --- 멀티 채팅 세션 (스마트스토어 전용) ---
+    st.subheader("💬 스마트스토어 상담 기록")
+    if st.button("➕ 스마트스토어 새 상담", use_container_width=True):
+        create_new_chat(chat_type="store")
+        st.rerun()
         
-    # 채팅 목록 출력
+    # 채팅 목록 출력 (store 타입만)
+    has_store_chats = False
     for cid, chat_data in reversed(chats.items()):
-        c_type = chat_data.get('chat_type', 'health')
-        icon = "🛒" if c_type == "store" else "💊"
-        is_active = (cid == current_chat_id and st.session_state.page == "chat")
-        if st.button(
-            f"{'▶ ' if is_active else ''}{icon} {chat_data['name']}",
-            key=f"chat_btn_{cid}",
-            use_container_width=True
-        ):
-            st.session_state.current_chat_id = cid
-            st.session_state.page = "chat"
-            st.rerun()
+        if chat_data.get('chat_type') == "store":
+            has_store_chats = True
+            is_active = (cid == current_chat_id and st.session_state.page == "chat")
+            if st.button(
+                f"{'▶ ' if is_active else ''}🛒 {chat_data['name']}",
+                key=f"chat_btn_{cid}",
+                use_container_width=True
+            ):
+                st.session_state.current_chat_id = cid
+                st.session_state.page = "chat"
+                st.rerun()
+                
+    if not has_store_chats:
+        st.caption("저장된 스마트스토어 상담 내역이 없습니다.")
 
     # API 설정 섹션 삭제됨 (기본적으로 환경변수의 OpenAI 키 사용)
     selected_model = "openai"
@@ -228,6 +231,20 @@ if st.session_state.page == "auto_reply":
         st.info("현재 미답변 문의가 없습니다. 버튼을 눌러 새로고침 하세요.")
     else:
         st.divider()
+        
+        # 가져온 데이터를 리스트(표) 형태로 우선 보여주기
+        import pandas as pd
+        df_items = pd.DataFrame([{
+            "문의번호": str(item.get('questionId', item.get('inquiryNo', ''))),
+            "상품명": item.get('productName', '상품명 없음'),
+            "제목": item.get('title', item.get('questionTitle', '상품 문의')),
+            "작성일": item.get('createDate', '')[:10] if item.get('createDate') else ''
+        } for item in items])
+        
+        st.markdown("### 📋 미답변 문의 리스트")
+        st.dataframe(df_items, use_container_width=True, hide_index=True)
+        st.write("")
+        
         agent = load_agent()
         update_api_keys(agent, selected_model)
         
@@ -295,131 +312,280 @@ if st.session_state.page == "auto_reply":
                 
                 st.divider()
 
-else:
+elif st.session_state.page == "chat":
     # ----------------------------------------
-    # [일반 채팅 상담] 화면
+    # [일반 채팅 상담] 화면 (스마트스토어 전용 - Q&A 폼 형식)
     # ----------------------------------------
-    current_chat_type = chats[current_chat_id].get('chat_type', 'health')
+    current_chat_type = chats[current_chat_id].get('chat_type', 'store')
     
     col_title, col_del = st.columns([4, 1])
     with col_title:
-        if current_chat_type == "store":
-            st.title("🛒 스마트스토어")
-        else:
-            st.title("💊 상담 내용")
+        st.title("🛒 스마트스토어 상담 (Q&A 형식)")
         chat_name = chats[current_chat_id]['name']
         st.caption(f"현재 상담: {chat_name}")
         
     with col_del:
         st.write("") # 타이틀 높이 여백
         st.write("")
-        if st.button("🗑️ 현재 상담 삭제", use_container_width=True, type="secondary"):
-            if current_chat_id in chats:
-                db.delete_chat(current_chat_id)
-                del chats[current_chat_id]
-                # 다른 채팅으로 이동
-                if chats:
-                    st.session_state.current_chat_id = list(chats.keys())[-1]
-                    st.session_state.page = "chat"
-                else:
-                    create_new_chat()
+        del_confirm_key = f"confirm_del_{current_chat_id}"
+        
+        if st.session_state.get(del_confirm_key, False):
+            st.error("정말 삭제하시겠습니까?")
+            col_y, col_n = st.columns(2)
+            if col_y.button("✔️ 예", use_container_width=True, type="primary"):
+                if current_chat_id in chats:
+                    db.delete_chat(current_chat_id)
+                    del chats[current_chat_id]
+                    
+                    # 다른 store 채팅으로 이동
+                    store_chats = [cid for cid, c in chats.items() if c.get('chat_type') == 'store']
+                    if store_chats:
+                        st.session_state.current_chat_id = store_chats[-1]
+                        st.session_state.page = "chat"
+                    else:
+                        st.session_state.page = "littlelabs_qna" # 기본 화면으로
+                    
+                    st.session_state[del_confirm_key] = False
+                    st.rerun()
+            if col_n.button("❌ 아니오", use_container_width=True):
+                st.session_state[del_confirm_key] = False
+                st.rerun()
+        else:
+            if st.button("🗑️ 현재 상담 삭제", use_container_width=True, type="secondary"):
+                st.session_state[del_confirm_key] = True
                 st.rerun()
 
     # 현재 채팅방 메시지 렌더링
     messages = chats[current_chat_id]['messages']
+    real_messages = messages[1:] if len(messages) > 0 else []
     
-    is_generating = False
+    last_user_msg = next((m for m in reversed(real_messages) if m["role"] == "user"), None)
+    last_asst_msg = next((m for m in reversed(real_messages) if m["role"] == "assistant"), None)
+    
+    default_q = last_user_msg["content"] if last_user_msg else ""
+    default_a = last_asst_msg["content"] if last_asst_msg else ""
+    default_sources = last_asst_msg["sources"] if last_asst_msg else []
 
-    for message in messages:
-        with st.chat_message(message["role"]):
-            if message["content"] == "[GENERATING]":
-                is_generating = True
-                with st.spinner("백그라운드에서 답변을 작성 중입니다... (다른 작업을 하셔도 됩니다)"):
-                    st.empty()
+    state_q_key = f"q_{current_chat_id}"
+    state_a_key = f"draft_{current_chat_id}"
+    state_src_key = f"sources_{current_chat_id}"
+    
+    if state_q_key not in st.session_state:
+        st.session_state[state_q_key] = default_q
+    if state_a_key not in st.session_state:
+        st.session_state[state_a_key] = default_a
+    if state_src_key not in st.session_state:
+        st.session_state[state_src_key] = default_sources
+
+    st.markdown("### ❓ 질문 입력창")
+    placeholder_text = "질문을 입력해주세요 (예: 배송 언제 되나요?)"
+    
+    question_input = st.text_area("고객의 질문을 입력하세요", value=st.session_state[state_q_key], height=100, label_visibility="collapsed", placeholder=placeholder_text)
+    
+    if question_input != st.session_state[state_q_key]:
+        st.session_state[state_q_key] = question_input
+
+    col_gen, col_empty = st.columns([1, 4])
+    with col_gen:
+        if st.button("🔄 AI 답변 갱신", use_container_width=True):
+            if not question_input.strip():
+                st.warning("질문을 먼저 입력해주세요.")
             else:
-                st.markdown(message["content"])
-                if message.get("sources"):
-                    with st.expander("📚 참고한 과거 상담 내역", expanded=False):
-                        for idx, src in enumerate(message["sources"], 1):
-                            st.markdown(f"**{idx}. {src['subject']}**")
-                            if src.get('date'):
-                                st.caption(f"상담일: {src['date']}")
-                                
-    # 폴링: 만약 생성 중이라면 주기적으로 화면을 새로고침하여 DB 확인
-    if is_generating:
-        import time
-        time.sleep(2)
-        st.rerun()
-
-    # 사용자 입력 처리
-    placeholder_text = "질문을 입력해주세요 (예: 배송 언제 되나요?)" if current_chat_type == "store" else "질문을 입력해주세요 (예: 임산부인데 철분제 추천해주세요)"
-    if prompt := st.chat_input(placeholder_text):
-        # API 키 확인
-        if selected_model == "openai" and not os.environ.get("OPENAI_API_KEY"):
-            st.warning("⚠️ 좌측 설정에서 OpenAI API 키를 먼저 저장해주세요!")
-            st.stop()
-        elif selected_model == "gemini" and not os.environ.get("GEMINI_API_KEY"):
-            st.warning("⚠️ 좌측 설정에서 Gemini API 키를 먼저 저장해주세요!")
-            st.stop()
-            
-        # 사용자 메시지 DB 저장 (ui 갱신은 rerun에 의해 처리됨)
-        db.add_message(current_chat_id, "user", prompt, [])
-
-        # 첫 질문일 경우 채팅 제목 자동 변경 (welcome + user = 2개째)
-        if len(messages) == 1: # messages 배열은 rerun 후에 최신화되므로 이 시점엔 1개일 수 있음
-            new_title = prompt[:15] + "..." if len(prompt) > 15 else prompt
-            db.rename_chat(current_chat_id, new_title)
-
-        # 백그라운드 처리를 위한 임시 메시지 추가
-        msg_id = db.add_message(current_chat_id, "assistant", "[GENERATING]", [])
-        
-        # 이전 문맥 가져오기
-        history_for_agent = messages if messages else []
-
-        def background_generate(chat_id, prompt_text, chat_type, history, model, target_msg_id):
-            try:
-                agent = load_agent()
-                update_api_keys(agent, model)
-                response_data = agent.generate_answer(
-                    prompt_text, 
-                    top_k=3, 
-                    use_model=model, 
-                    chat_type=chat_type, 
-                    history=history
-                )
-                
-                answer_text = response_data["answer"]
-                sources = response_data["sources"]
-                
-                # Check for [UPDATE_QNA]
-                import re
-                if "[UPDATE_QNA]" in answer_text:
-                    pattern = r"\[UPDATE_QNA\](.*?)\[/UPDATE_QNA\]"
-                    match = re.search(pattern, answer_text, re.DOTALL | re.IGNORECASE)
-                    if match:
-                        update_block = match.group(1)
-                        q_match = re.search(r"Q:\s*(.*?)\s*A:", update_block, re.DOTALL | re.IGNORECASE)
-                        a_match = re.search(r"A:\s*(.*)", update_block, re.DOTALL | re.IGNORECASE)
+                if selected_model == "openai" and not os.environ.get("OPENAI_API_KEY"):
+                    st.warning("⚠️ 좌측 설정에서 OpenAI API 키를 먼저 저장해주세요!")
+                elif selected_model == "gemini" and not os.environ.get("GEMINI_API_KEY"):
+                    st.warning("⚠️ 좌측 설정에서 Gemini API 키를 먼저 저장해주세요!")
+                else:
+                    with st.spinner("AI가 답변을 생성 중입니다..."):
+                        agent = load_agent()
+                        update_api_keys(agent, selected_model)
                         
-                        if q_match and a_match:
-                            extracted_q = q_match.group(1).strip()
-                            extracted_a = a_match.group(1).strip()
-                            agent.update_knowledge_base(chat_type, extracted_q, extracted_a)
+                        try:
+                            response_data = agent.generate_answer(
+                                question_input, 
+                                top_k=3, 
+                                use_model=selected_model, 
+                                chat_type=current_chat_type, 
+                                history=[]
+                            )
+                            answer_text = response_data["answer"]
+                            sources = response_data["sources"]
                             
-                        # 사용자에게 보여지는 답변에서는 이 블록을 제거
-                        answer_text = re.sub(pattern, "", answer_text, flags=re.DOTALL | re.IGNORECASE).strip()
-                        answer_text += "\n\n*(✅ 새로운 지식이 DB에 업데이트 되었습니다!)*"
-                        
-                db.update_message(target_msg_id, answer_text, sources)
-            except Exception as e:
-                db.update_message(target_msg_id, f"⚠️ 답변 생성 중 오류가 발생했습니다: {e}", [])
+                            import re
+                            if "[UPDATE_QNA]" in answer_text:
+                                pattern = r"\[UPDATE_QNA\](.*?)\[/UPDATE_QNA\]"
+                                match = re.search(pattern, answer_text, re.DOTALL | re.IGNORECASE)
+                                if match:
+                                    answer_text = re.sub(pattern, "", answer_text, flags=re.DOTALL | re.IGNORECASE).strip()
+                            
+                            st.session_state[state_a_key] = answer_text
+                            st.session_state[state_src_key] = sources
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"⚠️ 답변 생성 중 오류가 발생했습니다: {e}")
 
-        import threading
-        t = threading.Thread(
-            target=background_generate, 
-            args=(current_chat_id, prompt, current_chat_type, history_for_agent, selected_model, msg_id)
-        )
-        t.start()
-        
-        # 즉시 화면을 갱신하여 Spinner를 표시하도록 함
-        st.rerun()
+    st.divider()
+
+    st.markdown("### 📝 답변창 (수정 가능)")
+    draft = st.session_state.get(state_a_key, "")
+    
+    edited_answer = st.text_area("최종적으로 전송하거나 저장할 답변을 편집하세요.", value=draft, height=250, label_visibility="collapsed")
+    
+    if edited_answer != st.session_state.get(state_a_key, ""):
+        st.session_state[state_a_key] = edited_answer
+
+    sources = st.session_state.get(state_src_key, [])
+    if sources:
+        with st.expander("📚 참고한 과거 내역", expanded=False):
+            for idx, src in enumerate(sources, 1):
+                st.markdown(f"**{idx}. {src['subject']}**")
+                if src.get('date'):
+                    st.caption(f"상담일: {src['date']}")
+                    
+    st.write("")
+    
+    col_save, col_empty2 = st.columns([1, 4])
+    with col_save:
+        if st.button("💾 저장", type="primary", use_container_width=True):
+            if not question_input.strip():
+                st.warning("질문을 입력해주세요.")
+            elif not edited_answer.strip():
+                st.warning("답변을 입력해주세요.")
+            else:
+                if last_user_msg:
+                    db.update_message(last_user_msg["id"], question_input, [])
+                else:
+                    db.add_message(current_chat_id, "user", question_input, [])
+                    
+                if last_asst_msg:
+                    db.update_message(last_asst_msg["id"], edited_answer, sources)
+                else:
+                    db.add_message(current_chat_id, "assistant", edited_answer, sources)
+                    
+                new_title = question_input[:15] + "..." if len(question_input) > 15 else question_input
+                db.rename_chat(current_chat_id, new_title)
+                
+                # 수정한 답변을 기반으로 벡터 DB 지식 베이스 업데이트
+                agent = load_agent()
+                agent.update_knowledge_base(current_chat_type, question_input, edited_answer)
+                
+                st.session_state[f"saved_{current_chat_id}"] = True
+                st.rerun()
+                
+    if st.session_state.get(f"saved_{current_chat_id}"):
+        st.success("답변과 지식이 성공적으로 저장되었습니다!")
+        st.session_state[f"saved_{current_chat_id}"] = False
+
+elif st.session_state.page == "littlelabs_qna":
+    # ----------------------------------------
+    # [단일 Q&A 생성] 화면
+    # ----------------------------------------
+    current_chat_type = "health"
+    title = "💊 리틀랩스 Q&A"
+    
+    st.title(title)
+    st.caption("고객 문의에 대한 AI 답변 초안을 생성하고, 지식 베이스에 추가합니다.")
+    st.write("")
+
+    state_q_key = f"q_{current_chat_type}"
+    state_a_key = f"draft_{current_chat_type}"
+    state_src_key = f"sources_{current_chat_type}"
+    
+    if state_q_key not in st.session_state:
+        st.session_state[state_q_key] = ""
+    if state_a_key not in st.session_state:
+        st.session_state[state_a_key] = ""
+    if state_src_key not in st.session_state:
+        st.session_state[state_src_key] = []
+
+    st.markdown("### ❓ 질문 입력창")
+    placeholder_text = "질문을 입력해주세요 (예: 배송 언제 되나요?)" if current_chat_type == "store" else "질문을 입력해주세요 (예: 임산부인데 철분제 추천해주세요)"
+    
+    question_input = st.text_area("고객의 질문을 입력하세요", value=st.session_state[state_q_key], height=100, label_visibility="collapsed", placeholder=placeholder_text)
+    
+    if question_input != st.session_state[state_q_key]:
+        st.session_state[state_q_key] = question_input
+
+    col_gen, col_empty = st.columns([1, 4])
+    with col_gen:
+        if st.button("🔄 AI 답변 갱신", use_container_width=True):
+            if not question_input.strip():
+                st.warning("질문을 먼저 입력해주세요.")
+            else:
+                if selected_model == "openai" and not os.environ.get("OPENAI_API_KEY"):
+                    st.warning("⚠️ 좌측 설정에서 OpenAI API 키를 먼저 저장해주세요!")
+                elif selected_model == "gemini" and not os.environ.get("GEMINI_API_KEY"):
+                    st.warning("⚠️ 좌측 설정에서 Gemini API 키를 먼저 저장해주세요!")
+                else:
+                    with st.spinner("AI가 답변을 생성 중입니다..."):
+                        agent = load_agent()
+                        update_api_keys(agent, selected_model)
+                        
+                        try:
+                            response_data = agent.generate_answer(
+                                question_input, 
+                                top_k=3, 
+                                use_model=selected_model, 
+                                chat_type=current_chat_type, 
+                                history=[]
+                            )
+                            answer_text = response_data["answer"]
+                            sources = response_data["sources"]
+                            
+                            import re
+                            if "[UPDATE_QNA]" in answer_text:
+                                pattern = r"\[UPDATE_QNA\](.*?)\[/UPDATE_QNA\]"
+                                match = re.search(pattern, answer_text, re.DOTALL | re.IGNORECASE)
+                                if match:
+                                    # 사용자가 '저장' 버튼을 누를 때 지식 DB에 저장되도록 자동 저장 로직 제거
+                                    answer_text = re.sub(pattern, "", answer_text, flags=re.DOTALL | re.IGNORECASE).strip()
+                            
+                            st.session_state[state_a_key] = answer_text
+                            st.session_state[state_src_key] = sources
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"⚠️ 답변 생성 중 오류가 발생했습니다: {e}")
+
+    st.divider()
+
+    st.markdown("### 📝 답변창 (수정 가능)")
+    draft = st.session_state.get(state_a_key, "")
+    
+    edited_answer = st.text_area("최종적으로 전송하거나 저장할 답변을 편집하세요.", value=draft, height=250, label_visibility="collapsed")
+    
+    if edited_answer != st.session_state.get(state_a_key, ""):
+        st.session_state[state_a_key] = edited_answer
+
+    sources = st.session_state.get(state_src_key, [])
+    if sources:
+        with st.expander("📚 참고한 과거 내역", expanded=False):
+            for idx, src in enumerate(sources, 1):
+                st.markdown(f"**{idx}. {src['subject']}**")
+                if src.get('date'):
+                    st.caption(f"상담일: {src['date']}")
+                    
+    st.write("")
+    
+    col_save, col_empty2 = st.columns([1, 4])
+    with col_save:
+        if st.button("💾 저장", type="primary", use_container_width=True):
+            if not question_input.strip():
+                st.warning("질문을 입력해주세요.")
+            elif not edited_answer.strip():
+                st.warning("답변을 입력해주세요.")
+            else:
+                # 수정한 답변을 기반으로 벡터 DB 지식 베이스 업데이트
+                agent = load_agent()
+                agent.update_knowledge_base(current_chat_type, question_input, edited_answer)
+                
+                st.session_state[f"saved_{current_chat_type}"] = True
+                
+                # 저장 후 입력창 초기화
+                st.session_state[state_q_key] = ""
+                st.session_state[state_a_key] = ""
+                st.session_state[state_src_key] = []
+                st.rerun()
+                
+    if st.session_state.get(f"saved_{current_chat_type}"):
+        st.success("답변과 지식이 성공적으로 저장되었습니다!")
+        st.session_state[f"saved_{current_chat_type}"] = False
