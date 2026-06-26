@@ -4,7 +4,8 @@ __pycache__/
 .DS_Store
 data/chats.json
 
-# 대용량 벡터 DB (100MB 초과, 구글 드라이브 연동)
+# 대용량 벡터 DB 및 로컬 DB 제외 (운영/로컬 분리)
+*.db
 data/counseling_vectors.db
 
 # 파이썬 가상환경
