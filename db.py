@@ -71,6 +71,16 @@ def init_db():
             )
         """)
         
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS excel_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                brand VARCHAR(50) NOT NULL,
+                filename VARCHAR(255) NOT NULL,
+                filepath TEXT NOT NULL,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # 기본 계정 생성 (테이블이 비어있을 경우)
         cur.execute("SELECT COUNT(*) as cnt FROM users")
         if cur.fetchone()["cnt"] == 0:
@@ -141,9 +151,9 @@ def get_all_chats() -> dict:
     chats = {}
     with get_conn() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, chat_type FROM chats ORDER BY created_at ASC, id ASC")
+        cur.execute("SELECT id, name, chat_type, created_at FROM chats ORDER BY created_at ASC, id ASC")
         for row in cur.fetchall():
-            chats[row["id"]] = {"name": row["name"], "chat_type": row["chat_type"] or "health", "messages": []}
+            chats[row["id"]] = {"name": row["name"], "chat_type": row["chat_type"] or "health", "created_at": row["created_at"], "messages": []}
 
         if not chats:
             return chats
@@ -209,3 +219,32 @@ def delete_chat(chat_id: str):
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
+
+def add_excel_file(brand: str, filename: str, filepath: str):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO excel_files (brand, filename, filepath) VALUES (?, ?, ?)",
+            (brand, filename, filepath)
+        )
+        return cur.lastrowid
+
+def get_excel_files(brand: str):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, filename, filepath, uploaded_at FROM excel_files WHERE brand = ? ORDER BY uploaded_at DESC", (brand,))
+        return [dict(row) for row in cur.fetchall()]
+
+def delete_excel_file(file_id: int):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT filepath FROM excel_files WHERE id = ?", (file_id,))
+        row = cur.fetchone()
+        if row:
+            try:
+                import os
+                if os.path.exists(row['filepath']):
+                    os.remove(row['filepath'])
+            except Exception as e:
+                print(f"Failed to delete file {row['filepath']}: {e}")
+        cur.execute("DELETE FROM excel_files WHERE id = ?", (file_id,))

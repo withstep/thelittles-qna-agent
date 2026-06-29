@@ -7,6 +7,14 @@ from retriever import Retriever
 os.environ["HF_HUB_DISABLE_HTTP2"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["TQDM_DISABLE"] = "1"
+
+try:
+    from transformers.utils import logging as hf_logging
+    hf_logging.disable_progress_bar()
+except ImportError:
+    pass
 
 # Optional imports for LLM APIs
 try:
@@ -54,40 +62,20 @@ class QnAAgent:
                             raise
                         time.sleep(1)
             
-            if chat_type == "store":
-                self.retrievers[chat_type] = Retriever(db_path='naver_data/naver_vectors.db', model=self.model)
-            else:
-                self.retrievers[chat_type] = Retriever(db_path='data/counseling_vectors.db', model=self.model)
+            brand = chat_type.replace("cs_", "").replace("qa_", "").replace("excel_", "")
+            if brand == "store": brand = "thelittles" # Fallback
+            if brand == "health": brand = "littlelabs" # Fallback
+            
+            db_path = f'data/vectors_{brand}.db'
+            self.retrievers[chat_type] = Retriever(db_path=db_path, model=self.model)
         return self.retrievers[chat_type]
 
     def _build_prompt(self, query: str, contexts: list, chat_type: str = "health") -> str:
-        context_str = "\n\n---\n\n".join([f"[과거 내역]\n제목: {c.get('wr_subject', '')}\n내용:\n{c.get('chunk_text', '')}" for c in contexts])
+        context_str = "\n\n---\n\n".join([f"[검색된 지식]\n제목: {c.get('wr_subject', '')}\n내용:\n{c.get('chunk_text', '')}" for c in contexts])
         
-        if chat_type == "store":
-            prompt = f"""당신은 '네이버 스토어 고객센터 매니저'라는 이름의 친절하고 전문적인 상담원입니다.
-사용자의 스토어 및 제품 관련 문의에 대해 답변해주세요.
+        prompt = f"""아래에 제공된 [검색된 지식 DB 및 가이드 내용]을 최우선으로 참고하여 사용자의 질문에 답변을 작성해주세요.
 
-아래에 제공된 [과거 내역]은 제품 정보, 배송, 교환/반품 등과 관련된 데이터입니다.
-이 정보들을 최우선으로 참고하여 정확하고 친절하게 답변을 제공하세요.
-답변은 "~해요", "~합니다" 등의 고객 서비스에 적합한 부드러운 말투를 사용하세요.
-
-[과거 내역]
-{context_str}
-
-[사용자 질문]
-{query}
-
-답변:"""
-        else:
-            prompt = f"""당신은 '리틀약사'라는 이름의 친절하고 전문적인 약사입니다.
-사용자의 건강 관련 질문이나 영양제 추천 요청에 대해 답변해주세요.
-
-아래에 제공된 [과거 내역]은 당신이 이전에 다른 환자/고객들에게 답변했던 내용입니다.
-이 정보들을 최우선으로 참고하여 일관성 있는 답변을 제공하세요.
-만약 과거 상담 내역에 충분한 정보가 없다면, 일반적인 약학적 지식을 바탕으로 안전하게 조언하되, 직접적인 의학적 진단은 피하세요.
-답변은 "~해요", "~합니다" 등의 부드럽고 친절한 말투를 사용하세요.
-
-[과거 내역]
+[검색된 지식 DB 및 가이드 내용]
 {context_str}
 
 [사용자 질문]
@@ -183,33 +171,71 @@ A: (저장/수정된 답변)
         emb = self.model.encode(chunk_text, normalize_embeddings=True).tolist()
         emb_bytes = struct.pack(f'{len(emb)}f', *emb)
         
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        brand = chat_type.replace("cs_", "").replace("qa_", "").replace("excel_", "")
+        if brand == "store": brand = "thelittles"
+        if brand == "health": brand = "littlelabs"
+        
+        db_path = f'data/vectors_{brand}.db'
+        
+        # Ensure DB is initialized
+        import naver_api_agent
+        naver_api_agent.init_vector_db(db_path, self.model.get_sentence_embedding_dimension())
+        
+        q_id = f"manual_{uuid.uuid4().hex[:8]}"
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO chunks (inquiry_id, chunk_text, product_name, subject, is_answered, embedding)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (q_id, chunk_text, '수정된지식', question, 1, emb_bytes))
+        conn.commit()
+        conn.close()
+        print(f"[{brand.upper()} DB UPDATED] {question}")
 
-        if chat_type == "store":
-            db_path = 'naver_data/naver_vectors.db'
-            q_id = f"manual_{uuid.uuid4().hex[:8]}"
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO chunks (inquiry_id, chunk_text, product_name, subject, is_answered, embedding)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (q_id, chunk_text, '수정된지식', question, 1, emb_bytes))
-            conn.commit()
-            conn.close()
-            print(f"[STORE DB UPDATED] {question}")
-        else:
-            db_path = 'data/counseling_vectors.db'
-            wr_id = f"manual_{uuid.uuid4().hex[:8]}"
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO chunks (wr_id, chunk_type, chunk_text, ca_name, wr_subject, wr_datetime, wr_qna_ok, embedding)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (wr_id, 'manual', chunk_text, '사용자입력', question, now_str, '1', emb_bytes))
-            conn.commit()
-            conn.close()
-            print(f"[HEALTH DB UPDATED] {question}")
+    def delete_knowledge(self, chat_type: str, chunk_id: int):
+        import sqlite3
+        
+        brand = chat_type.replace("cs_", "").replace("qa_", "").replace("excel_", "")
+        if brand == "store": brand = "thelittles"
+        if brand == "health": brand = "littlelabs"
+        
+        db_path = f'data/vectors_{brand}.db'
+        
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM chunks WHERE id = ?", (chunk_id,))
+        conn.commit()
+        conn.close()
+        print(f"[{brand.upper()} DB DELETED] Chunk ID: {chunk_id}")
+
+    def edit_knowledge(self, chat_type: str, chunk_id: int, new_subject: str, new_chunk_text: str):
+        import sqlite3
+        import struct
+        
+        if self.model is None:
+            from sentence_transformers import SentenceTransformer
+            self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
             
+        emb = self.model.encode(new_chunk_text, normalize_embeddings=True).tolist()
+        emb_bytes = struct.pack(f'{len(emb)}f', *emb)
+        
+        brand = chat_type.replace("cs_", "").replace("qa_", "").replace("excel_", "")
+        if brand == "store": brand = "thelittles"
+        if brand == "health": brand = "littlelabs"
+        
+        db_path = f'data/vectors_{brand}.db'
+        
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE chunks 
+            SET subject = ?, chunk_text = ?, embedding = ?
+            WHERE id = ?
+        ''', (new_subject, new_chunk_text, emb_bytes, chunk_id))
+        conn.commit()
+        conn.close()
+        print(f"[{brand.upper()} DB EDITED] Chunk ID: {chunk_id}")
+
 if __name__ == "__main__":
     agent = QnAAgent()
     
