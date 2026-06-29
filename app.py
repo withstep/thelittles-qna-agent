@@ -74,7 +74,6 @@ load_dotenv(ENV_FILE)
 WELCOME_MESSAGE = "안녕하세요! 리틀약사 AI입니다. 건강과 영양제에 관한 궁금증을 해결해 드릴게요. 무엇을 도와드릴까요?"
 
 # DB 테이블 초기화 (1회)
-@st.cache_resource
 def init_database():
     db.init_db()
     return True
@@ -110,6 +109,44 @@ def create_new_chat(chat_type="health"):
     st.session_state.current_chat_id = chat_id
     st.session_state.page = "chat"
     return chat_id
+
+# 쿠키 컨트롤러 초기화 (최상단)
+from streamlit_cookies_controller import CookieController
+cookie_controller = CookieController()
+
+# 로그인 세션 확인
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+# 쿠키에서 세션 복원 시도
+if not st.session_state.user:
+    saved_user_id = cookie_controller.get('auth_user_id')
+    if saved_user_id:
+        user = db.get_user_by_id(saved_user_id)
+        if user:
+            st.session_state.user = user
+
+if not st.session_state.user:
+    st.title("💊 리틀약사 AI 로그인")
+    st.markdown("서비스를 이용하시려면 로그인이 필요합니다.")
+    
+    with st.form("user_login_form"):
+        username = st.text_input("아이디")
+        password = st.text_input("비밀번호", type="password")
+        submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
+        
+        if submitted:
+            user = db.verify_user(username, password)
+            if user:
+                st.session_state.user = user
+                cookie_controller.set('auth_user_id', user['id'])
+                st.success(f"환영합니다, {user['username']}님!")
+                import time
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("아이디 또는 비밀번호가 잘못되었습니다.")
+    st.stop()
 
 # 세션 상태 초기화
 if "page" not in st.session_state:
@@ -154,6 +191,14 @@ current_chat_id = st.session_state.current_chat_id
 
 with st.sidebar:
     st.title("💊 리틀약사 AI")
+    
+    st.markdown(f"**👤 {st.session_state.user['username']}**님 환영합니다.")
+    if st.button("로그아웃", use_container_width=True):
+        st.session_state.user = None
+        cookie_controller.remove('auth_user_id')
+        st.rerun()
+        
+    st.divider()
     
     # --- 자동화 봇 ---
     st.subheader("🤖 CS 자동화")
@@ -206,6 +251,18 @@ with st.sidebar:
     if not has_store_chats:
         st.caption("저장된 스마트스토어 상담 내역이 없습니다.")
 
+    if st.session_state.user.get("role") == "admin":
+        st.divider()
+        st.subheader("⚙️ 관리")
+        
+        if st.button("⚙️ 환경 설정", use_container_width=True, type="primary" if st.session_state.page == "settings" else "secondary"):
+            st.session_state.page = "settings"
+            st.rerun()
+            
+        if st.button("👥 회원 관리", use_container_width=True, type="primary" if st.session_state.page == "user_management" else "secondary"):
+            st.session_state.page = "user_management"
+            st.rerun()
+
     # API 설정 섹션 삭제됨 (기본적으로 환경변수의 OpenAI 키 사용)
     selected_model = "openai"
 
@@ -213,7 +270,75 @@ with st.sidebar:
 # 3. 메인 화면 분기
 # ==========================================
 
-if st.session_state.page == "auto_reply":
+if st.session_state.page == "settings":
+    # ----------------------------------------
+    # [환경 설정] 화면
+    # ----------------------------------------
+    st.title("⚙️ 환경 설정")
+    st.markdown("AI 챗봇의 전반적인 동작 방식을 설정합니다.")
+    
+    st.subheader("💡 기본 필수 지침 (Context) 설정")
+    st.caption("모든 AI 답변 생성 시 봇에게 전달될 공통 지침입니다. (예: 과대광고 방지, 어조 등)")
+    
+    default_context = "답변 작성 시 건강기능식품 및 의약품 과대광고 가이드라인을 엄격히 준수하세요. 질병의 예방 및 치료에 효능·효과가 있다고 오인될 수 있는 표현(예: '치료합니다', '완치됩니다', '부작용이 전혀 없습니다')은 절대 사용하지 마세요."
+    current_context = db.get_setting("custom_context", default_context)
+    
+    if not db.get_setting("custom_context"):
+        # 초기화가 안 되어있다면 디폴트 값으로 저장
+        db.set_setting("custom_context", default_context)
+        current_context = default_context
+        
+    custom_context = st.text_area("AI 지침 (Context)", value=current_context, height=200, help="답변 시 AI가 반드시 지켜야 할 사항을 입력하세요.")
+    
+    if st.button("💾 설정 저장", type="primary"):
+        db.set_setting("custom_context", custom_context)
+        st.success("설정이 저장되었습니다!")
+
+elif st.session_state.page == "user_management":
+    if st.session_state.user.get("role") != "admin":
+        st.error("접근 권한이 없습니다.")
+        st.stop()
+        
+    st.title("👥 회원 관리")
+    st.markdown("사용자 계정을 추가하거나 삭제합니다.")
+    
+    users = db.get_all_users()
+    import pandas as pd
+    df = pd.DataFrame(users)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    st.subheader("신규 계정 추가")
+    with st.form("add_user_form"):
+        new_username = st.text_input("아이디")
+        new_password = st.text_input("비밀번호", type="password")
+        new_role = st.selectbox("권한", ["user", "admin"])
+        submitted = st.form_submit_button("사용자 추가")
+        
+        if submitted:
+            if not new_username or not new_password:
+                st.error("아이디와 비밀번호를 모두 입력해주세요.")
+            else:
+                success, msg = db.create_user(new_username, new_password, new_role)
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+                    
+    st.subheader("계정 삭제")
+    with st.form("delete_user_form"):
+        del_user_id = st.number_input("삭제할 사용자 ID (id 번호)", min_value=1, step=1)
+        del_submitted = st.form_submit_button("사용자 삭제", type="primary")
+        
+        if del_submitted:
+            if del_user_id == st.session_state.user["id"]:
+                st.error("현재 로그인 중인 계정은 삭제할 수 없습니다.")
+            else:
+                db.delete_user(del_user_id)
+                st.success("사용자가 삭제되었습니다.")
+                st.rerun()
+
+elif st.session_state.page == "auto_reply":
     # ----------------------------------------
     # [네이버 미답변 자동화 모드] 화면
     # ----------------------------------------

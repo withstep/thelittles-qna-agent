@@ -111,6 +111,15 @@ class QnAAgent:
         answer = ""
         
         system_content = "당신은 전문적이고 친절한 약사 '리틀약사'입니다." if chat_type == "health" else "당신은 전문적이고 친절한 '네이버 스토어 고객센터 매니저'입니다."
+        
+        try:
+            import db
+            custom_context = db.get_setting("custom_context", "")
+            if custom_context:
+                system_content += f"\n\n[추가 필수 지침(Context)]\n{custom_context}\n"
+        except Exception:
+            pass
+            
         system_content += """
 만약 사용자가 과거의 답변을 수정해달라고 하거나, 새로운 정보(질문과 답변 쌍)를 저장/기억해달라고 명시적으로 요청한다면,
 당신의 일반적인 응답 내용 맨 마지막에 반드시 아래와 같은 정확한 형식으로 수정될 질문과 답변을 포함해주세요:

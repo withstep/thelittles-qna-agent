@@ -54,7 +54,88 @@ def init_db():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_id ON messages (chat_id)")
+        
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key VARCHAR(100) PRIMARY KEY,
+                value TEXT
+            )
+        """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(20) DEFAULT 'user'
+            )
+        """)
+        
+        # 기본 계정 생성 (테이블이 비어있을 경우)
+        cur.execute("SELECT COUNT(*) as cnt FROM users")
+        if cur.fetchone()["cnt"] == 0:
+            import bcrypt
+            # 관리자 계정 생성
+            admin_pwd = bcrypt.hashpw("admin1234".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            cur.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", ("admin", admin_pwd, "admin"))
+            # 테스트 계정 생성
+            test_pwd = bcrypt.hashpw("test1234".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            cur.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", ("test", test_pwd, "user"))
+
+import bcrypt
+
+def verify_user(username, password):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE username = ?", (username,))
+        row = cur.fetchone()
+        if row:
+            if bcrypt.checkpw(password.encode('utf-8'), row["password_hash"].encode('utf-8')):
+                return {"id": row["id"], "username": row["username"], "role": row["role"]}
+        return None
+
+def get_user_by_id(user_id):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        if row:
+            return {"id": row["id"], "username": row["username"], "role": row["role"]}
+        return None
+
+def create_user(username, password, role="user"):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE username = ?", (username,))
+        if cur.fetchone():
+            return False, "이미 존재하는 아이디입니다."
+            
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        cur.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", (username, hashed, role))
+        return True, "계정이 생성되었습니다."
+
+def get_all_users():
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, username, role FROM users ORDER BY id ASC")
+        return [dict(row) for row in cur.fetchall()]
+
+def delete_user(user_id):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+def get_setting(key: str, default: str = "") -> str:
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cur.fetchone()
+        return row["value"] if row else default
+
+def set_setting(key: str, value: str):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
 
 def get_all_chats() -> dict:
     chats = {}
