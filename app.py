@@ -46,6 +46,11 @@ html, body, .stApp {
     font-weight: 700;
 }
 
+/* 기본 멀티페이지 사이드바 메뉴(app, admin 등) 숨김 */
+[data-testid="stSidebarNav"] {
+    display: none;
+}
+
 /* 버튼 마이크로 인터랙션 */
 div.stButton > button {
     border-radius: 10px !important;
@@ -194,7 +199,16 @@ with st.sidebar:
     if st.button("로그아웃", use_container_width=True):
         st.session_state.user = None
         cookie_controller.remove('auth_user_id')
-        st.rerun()
+        import streamlit.components.v1 as components
+        components.html("""
+            <script>
+                document.cookie = "auth_user_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+                setTimeout(function() {
+                    window.parent.location.reload();
+                }, 100);
+            </script>
+        """, height=0)
+        st.stop()
         
     st.divider()
     
