@@ -19,6 +19,9 @@ API_HOST = "https://api.commerce.naver.com"
 QNA_ENDPOINT = f"{API_HOST}/external/v1/contents/qnas"
 
 def get_credentials(brand):
+    from dotenv import load_dotenv
+    load_dotenv(override=True)  # 최신 .env 파일 강제 리로드
+    
     brand = brand.upper()
     client_id = os.environ.get(f"NAVER_CLIENT_ID_{brand}", "")
     client_secret = os.environ.get(f"NAVER_CLIENT_SECRET_{brand}", "")
@@ -110,9 +113,10 @@ def fetch_inquiries(brand):
             }
             url = f"{API_HOST}/external/v1/contents/qnas"
             
-            max_retries = 5
+            max_retries = 10
             retry_count = 0
             success = False
+            is_last_page = False
             
             while retry_count < max_retries:
                 response = requests.get(url, headers=headers, params=params)
@@ -123,24 +127,32 @@ def fetch_inquiries(brand):
                     all_inquiries.extend(contents)
                     
                     if data.get('last', True) or page >= data.get('totalPages', 1):
-                        success = True
-                        break
-                    page += 1
+                        is_last_page = True
+                        
+                    success = True
                     break 
                     
                 elif response.status_code == 429:
                     import time
-                    print(f"⚠️ 요청량 초과(429). 2초 대기 후 재시도... ({retry_count+1}/{max_retries})")
-                    time.sleep(2)
+                    wait_time = 3 + (retry_count * 2)
+                    print(f"⚠️ 요청량 초과(429). {wait_time}초 대기 후 재시도... ({retry_count+1}/{max_retries})")
+                    time.sleep(wait_time)
                     retry_count += 1
                     
                 else:
-                    print(f"❌ API 호출 실패 (상태 코드 {response.status_code})")
-                    print(f"구간: {from_date_str} ~ {to_date_str}, 응답: {response.text}")
+                    print(f"❌ API 오류: {response.text}")
                     break
-            
-            if not success and response.status_code != 200:
+                    
+            if not success:
+                print(f"❌ 데이터 수집 실패. (페이지 {page}) 구간 크롤링을 중단합니다.")
                 break
+                
+            if is_last_page:
+                break
+                
+            page += 1
+            import time
+            time.sleep(1)
                 
         current_end = current_start - timedelta(seconds=1)
 
@@ -261,10 +273,10 @@ def process_and_save(brand="thelittles"):
         q_id = str(item.get('questionId', item.get('inquiryNo', '')))
         p_name = item.get('productName', '상품명 없음')
         title = item.get('title', item.get('questionTitle', ''))
-        content = item.get('content', item.get('questionContent', ''))
+        content = item.get('content', item.get('questionContent', item.get('question', '')))
         
         is_answered = item.get('isAnswered', item.get('answered', False))
-        answer = item.get('answerContent', '') if is_answered else '답변 대기중'
+        answer = item.get('answerContent', item.get('answer', '')) if is_answered else '답변 대기중'
         
         chunk_text = f"[상품명] {p_name}\n[제목] {title}\n[질문] {content}\n[답변] {answer}"
         

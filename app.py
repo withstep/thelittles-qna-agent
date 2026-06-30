@@ -155,7 +155,7 @@ if "page" not in st.session_state:
     st.session_state.page = "cs_thelittles"
 
 if "unanswered_list" not in st.session_state:
-    st.session_state.unanswered_list = []
+    st.session_state.unanswered_list = {}
 
 if "draft_answers" not in st.session_state:
     st.session_state.draft_answers = {}
@@ -462,10 +462,17 @@ elif st.session_state.page.startswith("cs_"):
     if st.button("🔄 미답변 문의 가져오기 (최근 7일)"):
         with st.spinner("미답변 문의를 조회 중입니다..."):
             items = naver_api_agent.fetch_unanswered_inquiries(brand, days=7)
-            st.session_state.unanswered_list = items
+            
+            if not isinstance(st.session_state.unanswered_list, dict):
+                st.session_state.unanswered_list = {}
+                
+            st.session_state.unanswered_list[brand] = items
             st.success(f"총 {len(items)}건의 미답변 문의를 찾았습니다.")
 
-    items = st.session_state.unanswered_list
+    if not isinstance(st.session_state.unanswered_list, dict):
+        st.session_state.unanswered_list = {}
+        
+    items = st.session_state.unanswered_list.get(brand, [])
     if not items:
         st.info("현재 미답변 문의가 없습니다. 버튼을 눌러 새로고침 하세요.")
     else:
@@ -522,7 +529,7 @@ elif st.session_state.page.startswith("cs_"):
                             if success:
                                 st.success(msg)
                                 naver_api_agent.update_inquiry_to_db(brand, q_id, p_name, title, content, edited_answer, agent.model)
-                                st.session_state.unanswered_list = [i for i in st.session_state.unanswered_list if str(i.get('questionId', i.get('inquiryNo', ''))) != q_id]
+                                st.session_state.unanswered_list[brand] = [i for i in st.session_state.unanswered_list.get(brand, []) if str(i.get('questionId', i.get('inquiryNo', ''))) != q_id]
                                 st.rerun()
                             else:
                                 st.error(msg)
