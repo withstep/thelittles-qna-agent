@@ -84,10 +84,58 @@ class QnAAgent:
 답변:"""
         return prompt
 
-    def generate_answer(self, query: str, top_k: int = 3, use_model: str = "openai", chat_type: str = "health", history: list = None) -> dict:
-        print(f"Searching for relevant past Q&A for: '{query}' ({chat_type})...")
+    def _run_ocr(self, image_path: str) -> str:
+        if not image_path or not os.path.exists(image_path):
+            return ""
+            
+        print(f"Running OCR on image: {image_path}...")
+        import base64
+        try:
+            with open(image_path, "rb") as image_file:
+                b64_img = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            ext = image_path.split('.')[-1].lower()
+            mime_type = f"image/{ext}" if ext in ["png", "jpeg", "jpg", "gif", "webp"] else "image/jpeg"
+            if ext == "jpg":
+                mime_type = "image/jpeg"
+                
+            ocr_prompt = "이 이미지(제품 성분표, 패키지, 문의 캡처 등)에 있는 모든 텍스트를 정확하게 추출해서 한국어와 영어 텍스트 그대로 반환해주세요. 추가적인 설명이나 해석 없이, 오직 추출한 텍스트만 출력하세요."
+            
+            if self.openai_api_key and OpenAI:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": ocr_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_img}"}}
+                        ]
+                    }
+                ]
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    temperature=0.1
+                )
+                ocr_text = response.choices[0].message.content.strip()
+                print(f"OCR result length: {len(ocr_text)} chars")
+                return ocr_text
+        except Exception as e:
+            print(f"Error during OCR preprocessing: {e}")
+        return ""
+
+    def generate_answer(self, query: str, top_k: int = 3, use_model: str = "openai", chat_type: str = "health", history: list = None, image_path: str = None) -> dict:
+        ocr_text = ""
+        search_query = query
+        
+        if image_path and os.path.exists(image_path):
+            ocr_text = self._run_ocr(image_path)
+            if ocr_text:
+                # 검색 쿼리에 추출된 OCR 텍스트 결합 (최대 300자)
+                search_query = f"{query} {ocr_text[:300]}"
+                
+        print(f"Searching for relevant past Q&A for: '{query}' (Search Query: '{search_query[:100]}...') ({chat_type})...")
         retriever = self.get_retriever(chat_type)
-        contexts = retriever.hybrid_search(query, top_k=top_k)
+        contexts = retriever.hybrid_search(search_query, top_k=top_k)
         
         if not contexts:
             return {
@@ -96,6 +144,9 @@ class QnAAgent:
             }
             
         prompt = self._build_prompt(query, contexts, chat_type)
+        if ocr_text:
+            prompt = f"[첨부 이미지에서 추출된 성분/텍스트 정보]\n{ocr_text}\n\n---\n\n" + prompt
+            
         answer = ""
         
         system_content = "당신은 전문적이고 친절한 약사 '리틀약사'입니다." if chat_type == "health" else "당신은 전문적이고 친절한 '네이버 스토어 고객센터 매니저'입니다."
@@ -127,7 +178,25 @@ A: (저장/수정된 답변)
                     if role in ["user", "assistant"]:
                         api_messages.append({"role": role, "content": msg.get("content", "")})
             
-            api_messages.append({"role": "user", "content": prompt})
+            if image_path and os.path.exists(image_path):
+                import base64
+                with open(image_path, "rb") as image_file:
+                    b64_img = base64.b64encode(image_file.read()).decode('utf-8')
+                
+                ext = image_path.split('.')[-1].lower()
+                mime_type = f"image/{ext}" if ext in ["png", "jpeg", "jpg", "gif", "webp"] else "image/jpeg"
+                if ext == "jpg":
+                    mime_type = "image/jpeg"
+                    
+                api_messages.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_img}"}}
+                    ]
+                })
+            else:
+                api_messages.append({"role": "user", "content": prompt})
             
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",

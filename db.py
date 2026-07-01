@@ -61,6 +61,10 @@ def init_db():
                 value TEXT
             )
         """)
+        try:
+            cur.execute("ALTER TABLE messages ADD COLUMN image_path TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -158,7 +162,7 @@ def get_all_chats() -> dict:
         if not chats:
             return chats
 
-        cur.execute("SELECT id, chat_id, role, content, sources FROM messages ORDER BY id ASC")
+        cur.execute("SELECT id, chat_id, role, content, sources, image_path FROM messages ORDER BY id ASC")
         for row in cur.fetchall():
             cid = row["chat_id"]
             if cid not in chats:
@@ -173,6 +177,7 @@ def get_all_chats() -> dict:
                 "role": row["role"],
                 "content": row["content"],
                 "sources": sources,
+                "image_path": row["image_path"]
             })
     return chats
 
@@ -189,22 +194,32 @@ def create_chat(chat_id: str, name: str, welcome_message: str, chat_type: str = 
         )
 
 
-def add_message(chat_id: str, role: str, content: str, sources: list) -> int:
+def add_message(chat_id: str, role: str, content: str, sources: list, image_path: str = None) -> int:
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO messages (chat_id, role, content, sources) VALUES (?, ?, ?, ?)",
-            (chat_id, role, content, json.dumps(sources or [], ensure_ascii=False)),
+            "INSERT INTO messages (chat_id, role, content, sources, image_path) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, role, content, json.dumps(sources or [], ensure_ascii=False), image_path),
         )
         return cur.lastrowid
 
-def update_message(msg_id: int, content: str, sources: list):
+def update_message(msg_id: int, content: str, sources: list, image_path: str = None):
     with get_conn() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "UPDATE messages SET content = ?, sources = ? WHERE id = ?",
-            (content, json.dumps(sources or [], ensure_ascii=False), msg_id)
-        )
+        
+        # 기본적으로 content와 sources는 업데이트
+        query = "UPDATE messages SET content = ?, sources = ?"
+        params = [content, json.dumps(sources or [], ensure_ascii=False)]
+        
+        # image_path가 제공되면 해당 컬럼도 업데이트
+        if image_path is not None:
+            query += ", image_path = ?"
+            params.append(image_path)
+            
+        query += " WHERE id = ?"
+        params.append(msg_id)
+        
+        cur.execute(query, tuple(params))
 
 
 def rename_chat(chat_id: str, name: str):

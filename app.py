@@ -167,8 +167,10 @@ if "draft_answers" not in st.session_state:
 
 @st.cache_resource(show_spinner="AI 모델 초기화 중...")
 def load_agent():
-    print("Loading new agent instance...")
+    print("Loading new agent instance (with image_path support)...")
     import agent
+    import importlib
+    importlib.reload(agent)
     return agent.QnAAgent()
 
 def update_api_keys(agent, model_choice):
@@ -600,6 +602,21 @@ elif st.session_state.page.startswith("qa_"):
             st.caption(f"등록일: {created_at}")
         edited_q = st.text_area("질문 내용", value=q_text, height=100, key=f"edit_q_{cid}", label_visibility="collapsed")
         
+        uploaded_image = st.file_uploader("이미지 첨부 (선택)", type=["png", "jpg", "jpeg", "webp"], key=f"img_up_{cid}")
+        img_path_for_db = q_msg.get("image_path") if q_msg else None
+        
+        if uploaded_image is not None:
+            import os
+            import uuid
+            os.makedirs("data/images", exist_ok=True)
+            new_img_path = f"data/images/{uuid.uuid4().hex[:8]}_{uploaded_image.name}"
+            with open(new_img_path, "wb") as f:
+                f.write(uploaded_image.getbuffer())
+            img_path_for_db = new_img_path
+            
+        if img_path_for_db and os.path.exists(img_path_for_db):
+            st.image(img_path_for_db, width=300, caption="첨부된 이미지")
+        
         agent = load_agent()
         update_api_keys(agent, selected_model)
         
@@ -620,20 +637,21 @@ elif st.session_state.page.startswith("qa_"):
                 if not edited_q.strip():
                     st.warning("먼저 질문 내용을 입력해주세요.")
                 else:
-                    with st.spinner("AI 답변 생성 중..."):
+                    spinner_text = "이미지 분석(OCR) 및 AI 답변 생성 중..." if img_path_for_db else "AI 답변 생성 중..."
+                    with st.spinner(spinner_text):
                         if is_new:
                             cid = create_new_chat(st.session_state.page)
-                            db.add_message(cid, "user", edited_q, [])
+                            db.add_message(cid, "user", edited_q, [], image_path=img_path_for_db)
                             db.rename_chat(cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
                             st.session_state[selected_qa_key] = cid
                         else:
                             if q_msg:
-                                db.update_message(q_msg["id"], edited_q, [])
+                                db.update_message(q_msg["id"], edited_q, [], image_path=img_path_for_db)
                             else:
-                                db.add_message(cid, "user", edited_q, [])
+                                db.add_message(cid, "user", edited_q, [], image_path=img_path_for_db)
                             db.rename_chat(cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
 
-                        res = agent.generate_answer(edited_q, top_k=3, use_model=selected_model, chat_type=st.session_state.page)
+                        res = agent.generate_answer(edited_q, top_k=3, use_model=selected_model, chat_type=st.session_state.page, image_path=img_path_for_db)
                         import re
                         ans_text = res["answer"]
                         if "[UPDATE_QNA]" in ans_text:
@@ -674,7 +692,7 @@ elif st.session_state.page.startswith("qa_"):
                 else:
                     if current_cid == "NEW_DRAFT":
                         new_cid = create_new_chat(st.session_state.page)
-                        db.add_message(new_cid, "user", edited_q, [])
+                        db.add_message(new_cid, "user", edited_q, [], image_path=img_path_for_db)
                         db.add_message(new_cid, "assistant", edited_ans, temp_src)
                         db.rename_chat(new_cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
                         
@@ -687,9 +705,9 @@ elif st.session_state.page.startswith("qa_"):
                         st.rerun()
                     else:
                         if q_msg:
-                            db.update_message(q_msg["id"], edited_q, [])
+                            db.update_message(q_msg["id"], edited_q, [], image_path=img_path_for_db)
                         else:
-                            db.add_message(current_cid, "user", edited_q, [])
+                            db.add_message(current_cid, "user", edited_q, [], image_path=img_path_for_db)
                             
                         if a_msg:
                             db.update_message(a_msg["id"], edited_ans, temp_src)
@@ -705,7 +723,7 @@ elif st.session_state.page.startswith("qa_"):
                         st.rerun()
         
         with col_save2:
-            if st.button("DB저장 (지식 반영)", type="primary", use_container_width=True):
+            if st.button("지식 반영", type="primary", use_container_width=True):
                 if not edited_q.strip() or not edited_ans.strip():
                     st.warning("질문과 답변을 모두 입력해주세요.")
                 else:
@@ -713,7 +731,7 @@ elif st.session_state.page.startswith("qa_"):
                     
                     if current_cid == "NEW_DRAFT":
                         new_cid = create_new_chat(st.session_state.page)
-                        db.add_message(new_cid, "user", edited_q, [])
+                        db.add_message(new_cid, "user", edited_q, [], image_path=img_path_for_db)
                         db.add_message(new_cid, "assistant", edited_ans, temp_src)
                         db.rename_chat(new_cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
                         
@@ -722,9 +740,9 @@ elif st.session_state.page.startswith("qa_"):
                         st.session_state[selected_qa_key] = "NEW_DRAFT"
                     else:
                         if q_msg:
-                            db.update_message(q_msg["id"], edited_q, [])
+                            db.update_message(q_msg["id"], edited_q, [], image_path=img_path_for_db)
                         else:
-                            db.add_message(current_cid, "user", edited_q, [])
+                            db.add_message(current_cid, "user", edited_q, [], image_path=img_path_for_db)
                             
                         if a_msg:
                             db.update_message(a_msg["id"], edited_ans, temp_src)
