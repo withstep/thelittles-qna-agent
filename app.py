@@ -239,6 +239,7 @@ with st.sidebar:
         nav_button("더리틀스", "excel_thelittles")
         nav_button("퓨어젠", "excel_puregen")
         nav_button("그린루트", "excel_greenroot")
+        nav_button("리틀랩스", "excel_littlelabs")
         nav_button("지식 DB 통합 관리", "admin_vector_db")
         
         st.write("")
@@ -279,7 +280,8 @@ elif st.session_state.page == "admin_vector_db":
     brand_map = {
         "더리틀스": "thelittles",
         "퓨어젠": "puregen",
-        "그린루트": "greenroot"
+        "그린루트": "greenroot",
+        "리틀랩스": "littlelabs"
     }
     
     selected_brand_ko = st.selectbox("관리할 브랜드를 선택하세요", list(brand_map.keys()))
@@ -550,7 +552,7 @@ elif st.session_state.page.startswith("cs_"):
             st.divider()
 
 # ----------------------------------------
-# [공통] Q&A 자동화 (박스형 목록 UI)
+# [공통] Q&A 자동화 (상단 폼 + 하단 게시판 UI)
 # ----------------------------------------
 elif st.session_state.page.startswith("qa_"):
     brand = st.session_state.page.replace("qa_", "")
@@ -558,86 +560,45 @@ elif st.session_state.page.startswith("qa_"):
     
     selected_qa_key = f"selected_qa_{brand}"
     if selected_qa_key not in st.session_state:
-        st.session_state[selected_qa_key] = None
+        st.session_state[selected_qa_key] = "NEW_DRAFT"
 
-    if st.session_state[selected_qa_key] is None:
-        # --- Grid List View ---
-        st.title(page_title)
-        st.markdown("AI를 통해 새 질문과 답변을 생성하고 지식 DB에 저장합니다.")
-        st.divider()
-        
+    st.title(page_title)
+    st.markdown("AI를 통해 새 질문과 답변을 생성하고 지식 DB에 저장합니다.")
+    
+    # --- Top Section: Registration / Edit Form ---
+    cid = st.session_state[selected_qa_key]
+    is_new = (cid == "NEW_DRAFT")
+    
+    q_text = ""
+    a_msg = None
+    q_msg = None
+    created_at = ""
+    
+    if not is_new:
         chats = load_chats()
-        filtered_chats = {cid: c for cid, c in chats.items() if c.get('chat_type') == st.session_state.page}
-        
-        items = ["NEW"] + list(reversed(filtered_chats.items()))
-        cols_per_row = 3
-        
-        for i in range(0, len(items), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for j in range(cols_per_row):
-                if i + j < len(items):
-                    item = items[i + j]
-                    with cols[j]:
-                        with st.container(border=True):
-                            if item == "NEW":
-                                st.write("")
-                                st.write("")
-                                if st.button("➕", key=f"btn_new_{brand}", use_container_width=True):
-                                    st.session_state[selected_qa_key] = "NEW_DRAFT"
-                                    st.rerun()
-                                st.write("")
-                                st.write("")
-                            else:
-                                cid, chat_data = item
-                                q_msg = next((m for m in chat_data["messages"] if m["role"] == "user"), None)
-                                q_text = q_msg["content"] if q_msg else chat_data["name"]
-                                if len(q_text) > 40: q_text = q_text[:40] + "..."
-                                
-                                st.markdown(f"**Q.** {q_text}")
-                                st.caption(f"등록일: {chat_data.get('created_at', '')[:10]}")
-                                
-                                col_a, col_b = st.columns(2)
-                                with col_a:
-                                    if st.button("상세", key=f"detail_{cid}", use_container_width=True):
-                                        st.session_state[selected_qa_key] = cid
-                                        st.rerun()
-                                with col_b:
-                                    if st.button("삭제", key=f"del_{cid}", use_container_width=True):
-                                        db.delete_chat(cid)
-                                        st.rerun()
-
-    else:
-        # --- Detail View ---
-        cid = st.session_state[selected_qa_key]
-        
-        if cid == "NEW_DRAFT":
-            q_text = ""
-            a_msg = None
-            q_msg = None
-            created_at = ""
-        else:
-            chats = load_chats()
-            if cid not in chats:
-                st.session_state[selected_qa_key] = None
-                st.rerun()
-            chat_data = chats[cid]
-            q_msg = next((m for m in chat_data["messages"] if m["role"] == "user"), None)
-            q_text = q_msg["content"] if q_msg else chat_data["name"]
-            a_msg = next((m for m in reversed(chat_data["messages"]) if m["role"] == "assistant" and m["content"] != "안녕하세요! 무엇을 도와드릴까요?"), None)
-            created_at = chat_data.get('created_at', '')[:10]
-        
-        if st.button("◀ 목록으로 돌아가기"):
-            st.session_state[selected_qa_key] = None
+        if cid not in chats:
+            st.session_state[selected_qa_key] = "NEW_DRAFT"
             st.rerun()
-            
-        st.title("상세페이지" if cid != "NEW_DRAFT" else "새 질문 등록")
+        chat_data = chats[cid]
+        q_msg = next((m for m in chat_data["messages"] if m["role"] == "user"), None)
+        q_text = q_msg["content"] if q_msg else chat_data["name"]
+        a_msg = next((m for m in reversed(chat_data["messages"]) if m["role"] == "assistant" and m["content"] != "안녕하세요! 무엇을 도와드릴까요?"), None)
+        created_at = chat_data.get('created_at', '')[:10]
         
-        st.markdown("### ❓ 질문")
-        edited_q = st.text_area("질문 내용", value=q_text, height=100, key=f"edit_q_{cid}", label_visibility="collapsed")
+    with st.container(border=True):
+        col_hdr1, col_hdr2 = st.columns([8, 2])
+        with col_hdr1:
+            st.markdown("### ✏️ " + ("새 질문 등록" if is_new else "Q&A 상세보기 및 수정"))
+        with col_hdr2:
+            if not is_new:
+                if st.button("➕ 새 질문 쓰기", use_container_width=True):
+                    st.session_state[selected_qa_key] = "NEW_DRAFT"
+                    st.rerun()
+                    
+        st.markdown("##### ❓ 질문 내용")
         if created_at:
             st.caption(f"등록일: {created_at}")
-        
-        st.markdown("### 💡 답변")
+        edited_q = st.text_area("질문 내용", value=q_text, height=100, key=f"edit_q_{cid}", label_visibility="collapsed")
         
         agent = load_agent()
         update_api_keys(agent, selected_model)
@@ -655,13 +616,12 @@ elif st.session_state.page.startswith("qa_"):
                 
         col_gen, _ = st.columns([2, 8])
         with col_gen:
-            if st.button("✨ AI 답변 생성"):
+            if st.button("✨ AI 답변 생성", use_container_width=True):
                 if not edited_q.strip():
                     st.warning("먼저 질문 내용을 입력해주세요.")
                 else:
                     with st.spinner("AI 답변 생성 중..."):
-                        # 1. Save question to DB to prevent input loss on rerun
-                        if cid == "NEW_DRAFT":
+                        if is_new:
                             cid = create_new_chat(st.session_state.page)
                             db.add_message(cid, "user", edited_q, [])
                             db.rename_chat(cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
@@ -673,7 +633,6 @@ elif st.session_state.page.startswith("qa_"):
                                 db.add_message(cid, "user", edited_q, [])
                             db.rename_chat(cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
 
-                        # 2. Generate Draft
                         res = agent.generate_answer(edited_q, top_k=3, use_model=selected_model, chat_type=st.session_state.page)
                         import re
                         ans_text = res["answer"]
@@ -683,17 +642,15 @@ elif st.session_state.page.startswith("qa_"):
                             if match:
                                 ans_text = re.sub(pattern, "", ans_text, flags=re.DOTALL | re.IGNORECASE).strip()
                         
-                        # 3. Save to DB automatically
                         if a_msg:
                             db.update_message(a_msg["id"], ans_text, res["sources"])
                         else:
                             db.add_message(cid, "assistant", ans_text, res["sources"])
                             
-                        # 4. Store to session state with new cid if changed
                         new_temp_ans_key = f"temp_ans_{cid}"
                         new_temp_src_key = f"temp_src_{cid}"
                         st.session_state[new_temp_ans_key] = ans_text
-                        st.session_state[f"edit_ans_{cid}"] = ans_text  # Force update widget state
+                        st.session_state[f"edit_ans_{cid}"] = ans_text
                         st.session_state[new_temp_src_key] = res["sources"]
                         st.rerun()
 
@@ -711,7 +668,7 @@ elif st.session_state.page.startswith("qa_"):
                     
         col_save1, col_save2 = st.columns(2)
         with col_save1:
-            if st.button("저장하기", use_container_width=True):
+            if st.button("임시 저장", use_container_width=True):
                 if not edited_q.strip() or not edited_ans.strip():
                     st.warning("질문과 답변을 모두 입력해주세요.")
                 else:
@@ -723,7 +680,7 @@ elif st.session_state.page.startswith("qa_"):
                         
                         del st.session_state[current_temp_ans_key]
                         del st.session_state[current_temp_src_key]
-                        st.session_state[selected_qa_key] = None
+                        st.session_state[selected_qa_key] = "NEW_DRAFT"
                         st.success("새 Q&A 내역이 목록에 저장되었습니다.")
                         import time
                         time.sleep(1)
@@ -740,10 +697,15 @@ elif st.session_state.page.startswith("qa_"):
                             db.add_message(current_cid, "assistant", edited_ans, temp_src)
                             
                         db.rename_chat(current_cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
+                        st.session_state[current_temp_ans_key] = edited_ans
+                        st.session_state[selected_qa_key] = "NEW_DRAFT"
                         st.success("질문과 답변 내역이 임시 저장되었습니다.")
+                        import time
+                        time.sleep(1)
+                        st.rerun()
         
         with col_save2:
-            if st.button("DB저장", type="primary", use_container_width=True):
+            if st.button("DB저장 (지식 반영)", type="primary", use_container_width=True):
                 if not edited_q.strip() or not edited_ans.strip():
                     st.warning("질문과 답변을 모두 입력해주세요.")
                 else:
@@ -754,6 +716,10 @@ elif st.session_state.page.startswith("qa_"):
                         db.add_message(new_cid, "user", edited_q, [])
                         db.add_message(new_cid, "assistant", edited_ans, temp_src)
                         db.rename_chat(new_cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
+                        
+                        del st.session_state[current_temp_ans_key]
+                        del st.session_state[current_temp_src_key]
+                        st.session_state[selected_qa_key] = "NEW_DRAFT"
                     else:
                         if q_msg:
                             db.update_message(q_msg["id"], edited_q, [])
@@ -766,12 +732,54 @@ elif st.session_state.page.startswith("qa_"):
                             db.add_message(current_cid, "assistant", edited_ans, temp_src)
                             
                         db.rename_chat(current_cid, edited_q[:30] + ("..." if len(edited_q) > 30 else ""))
-                    
-                    del st.session_state[current_temp_ans_key]
-                    del st.session_state[current_temp_src_key]
-                    st.session_state[selected_qa_key] = None
+                        st.session_state[selected_qa_key] = "NEW_DRAFT"
                     
                     st.success("답변이 저장되고 지식 DB에 반영되었습니다.")
                     import time
                     time.sleep(1)
                     st.rerun()
+
+    st.divider()
+    
+    # --- Bottom Section: Bulletin Board ---
+    st.markdown("### 📋 등록된 Q&A 게시판")
+    
+    chats = load_chats()
+    filtered_chats = {k: v for k, v in chats.items() if v.get('chat_type') == st.session_state.page}
+    
+    if not filtered_chats:
+        st.info("등록된 질문이 없습니다.")
+    else:
+        col1, col2, col3, col4 = st.columns([5, 2, 1, 1])
+        col1.markdown("**제목**")
+        col2.markdown("**등록일**")
+        col3.markdown("**상세보기**")
+        col4.markdown("**삭제**")
+        st.markdown("<hr style='margin: 0.5rem 0; border: none; border-top: 1px solid #ddd;'/>", unsafe_allow_html=True)
+        
+        for cid, chat_data in reversed(list(filtered_chats.items())):
+            q_msg_list = [m for m in chat_data["messages"] if m["role"] == "user"]
+            q_text_disp = q_msg_list[0]["content"] if q_msg_list else chat_data["name"]
+            
+            q_text_disp = q_text_disp.replace("\n", " ").strip()
+            if len(q_text_disp) > 40:
+                q_text_disp = q_text_disp[:40] + "..."
+                
+            c_date = chat_data.get('created_at', '')[:10]
+            
+            c1, c2, c3, c4 = st.columns([5, 2, 1, 1])
+            with c1:
+                st.markdown(f"<div style='padding-top: 8px;'>{q_text_disp}</div>", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"<div style='padding-top: 8px;'>{c_date}</div>", unsafe_allow_html=True)
+            with c3:
+                if st.button("조회", key=f"view_{cid}", use_container_width=True):
+                    st.session_state[selected_qa_key] = cid
+                    st.rerun()
+            with c4:
+                if st.button("삭제", key=f"del_brd_{cid}", use_container_width=True):
+                    db.delete_chat(cid)
+                    if st.session_state.get(selected_qa_key) == cid:
+                        st.session_state[selected_qa_key] = "NEW_DRAFT"
+                    st.rerun()
+            st.markdown("<hr style='margin: 0; border: none; border-top: 1px solid #f0f0f0;'/>", unsafe_allow_html=True)

@@ -382,10 +382,15 @@ def ingest_excel_qa(brand, file_path_or_bytes, embedding_model=None):
                 emb = embedding_model.encode(chunk_text, normalize_embeddings=True).tolist()
                 emb_bytes = embedding_to_bytes(emb)
                 
+                # 새 제목 생성 (시트명 + 질문)
+                new_subject = f"[{sheet_name}] {question}"
+                if len(new_subject) > 80:
+                    new_subject = new_subject[:77] + "..."
+                
                 cursor.execute('''
                     INSERT INTO chunks (inquiry_id, chunk_text, product_name, subject, is_answered, embedding)
                     VALUES (?, ?, ?, ?, ?, ?)
-                ''', (q_id, chunk_text, '가이드라인', 'Q&A 가이드라인', 1, emb_bytes))
+                ''', (q_id, chunk_text, '가이드라인', new_subject, 1, emb_bytes))
                 inserted += 1
             
         conn.commit()
