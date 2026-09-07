@@ -1,0 +1,5 @@
+{
+  "_comment": "Apple 메모에서 추출한 상담 지식 원본. build_notes_vector_db.py가 EC2 컨테이너에서 읽어 임베딩합니다. 아래 placeholder는 배포 시 EC2의 data/notes_raw.json으로 교체(원본은 리포지토리에 커밋하지 않음 — 고객 상담 원문 비포함 여부는 리뷰 시 결정).",
+  "_excluded": ["브랜드 철학"],
+  "notes": "PLACEHOLDER_UPLOADED_AT_DEPLOY_TIME"
+}

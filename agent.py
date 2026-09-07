@@ -136,13 +136,34 @@ class QnAAgent:
         print(f"Searching for relevant past Q&A for: '{query}' (Search Query: '{search_query[:100]}...') ({chat_type})...")
         retriever = self.get_retriever(chat_type)
         contexts = retriever.hybrid_search(search_query, top_k=top_k)
-        
-        if not contexts:
+
+        # [보조 지식] Apple 메모 상담 지식 DB를 추가 참고 자료로 검색 (파일이 있을 때만)
+        notes_contexts = []
+        notes_db_path = 'data/vectors_notes.db'
+        if os.path.exists(notes_db_path):
+            try:
+                notes_retriever = self.retrievers.get("__notes__")
+                if notes_retriever is None:
+                    from retriever import Retriever as _Retriever
+                    if self.model is None:
+                        from sentence_transformers import SentenceTransformer
+                        self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+                    notes_retriever = _Retriever(db_path=notes_db_path, model=self.model)
+                    self.retrievers["__notes__"] = notes_retriever
+                notes_contexts = notes_retriever.hybrid_search(search_query, top_k=2)
+                # 브랜드 DB와 중복되는 청크 제거
+                seen = {c.get('chunk_text') for c in contexts}
+                notes_contexts = [c for c in notes_contexts if c.get('chunk_text') not in seen]
+            except Exception as e:
+                print(f"Notes retriever skipped: {e}")
+
+        if not contexts and not notes_contexts:
             return {
                 "answer": "관련된 과거 내역을 찾을 수 없습니다. 좀 더 구체적으로 질문해주세요.",
                 "sources": []
             }
-            
+
+        contexts = contexts + notes_contexts
         prompt = self._build_prompt(query, contexts, chat_type)
         if ocr_text:
             prompt = f"[첨부 이미지에서 추출된 성분/텍스트 정보]\n{ocr_text}\n\n---\n\n" + prompt
