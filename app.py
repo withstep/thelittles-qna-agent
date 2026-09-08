@@ -454,6 +454,21 @@ elif st.session_state.page.startswith("excel_"):
                 st.rerun()
 
     st.divider()
+    st.subheader("🔄 구글 시트 동기화")
+    sheet_id = naver_api_agent.get_sheet_id(brand)
+    if not sheet_id:
+        st.warning(f"이 브랜드에 연결된 구글 시트가 없습니다. (환경변수 GOOGLE_SHEET_ID_{brand.upper()} 미설정)")
+    else:
+        st.caption(f"연결된 시트: `{sheet_id}`")
+        if st.button("🔄 구글 시트에서 지식 DB 동기화", type="primary"):
+            with st.spinner("구글 시트 내용을 지식 DB에 반영 중입니다..."):
+                success, msg = naver_api_agent.sync_google_sheet_qa(brand)
+            if success:
+                st.success(msg)
+            else:
+                st.error(msg)
+
+    st.divider()
     st.subheader("📋 업로드된 가이드 목록")
     files = db.get_excel_files(brand)
     
